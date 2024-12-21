@@ -1,96 +1,160 @@
-function calculateReferralFee(category, price, feeStructures) {
-  const categoryFees = feeStructures.referralFees[category];
-  
-  if (!categoryFees) {
-    throw new Error(`Unknown category: ${category}`);
-  }
+const { referralFees, weightHandlingFees, closingFees, otherFees } = require('../data/fees');
 
-  if (Array.isArray(categoryFees)) {
-        const applicableFee = categoryFees.find(tier => 
-      (tier.maxPrice && price <= tier.maxPrice) || 
-      (tier.minPrice && price > tier.minPrice)
-    );
-    return (price * applicableFee.percentage) / 100;
-  } else {
-    
-    return (price * categoryFees.percentage) / 100;
+function calculateReferralFee(category, price) {
+  try {
+    let feeStructure;
+
+
+    if (category.startsWith('Automotive')) {
+      if (category.includes('Helmets')) {
+        feeStructure = referralFees.automotive.helmetsAndGloves;
+      } else if (category.includes('Tyres')) {
+        feeStructure = referralFees.automotive.tyresAndRims;
+      } else if (category.includes('Vehicles')) {
+        return price * (referralFees.automotive.vehicles.percentage / 100);
+      }
+    } else if (category.startsWith('Baby')) {
+      feeStructure = referralFees.baby.hardlines;
+    } else if (category === 'Books') {
+      feeStructure = referralFees.books;
+    }
+
+    if (!feeStructure) 
+          return price * 0.15; // Dft. rate
+
+    for (const tier of feeStructure) {
+      if (('maxPrice' in tier && price <= tier.maxPrice) || 
+          ('minPrice' in tier && price > tier.minPrice)) {
+        return price * (tier.percentage / 100);
+      }
+    }
+
+    return price * 0.15; // Dft. fallback
+  } catch (error) {
+    console.error('Error in calculateReferralFee:', error);
+    throw error;
   }
 }
 
-function calculateWeightHandlingFee(weight, shippingMode, serviceLevel, location, feeStructures) {
-  const fees = feeStructures.weightHandlingFees[shippingMode]?.[serviceLevel];
-  if (!fees) {
-    throw new Error('Invalid shipping mode or service level');
+function calculateWeightHandlingFee(mode, weight, serviceLevel, location, size) {
+  try {
+    if (mode === 'Easy Ship') {
+      const fees = weightHandlingFees.easyShip;
+      const sizeFees = size === 'Standard' ? fees.standard : fees.heavyBulky;
+
+      if (size === 'Standard') {
+        if (weight <= 0.5) {
+          return sizeFees.first500g[location.toLowerCase()];
+        } else if (weight <= 1) {
+          return sizeFees.first500g[location.toLowerCase()] + 
+                 sizeFees.additional500gUpTo1kg[location.toLowerCase()];
+        } else if (weight <= 5) {
+          return sizeFees.first500g[location.toLowerCase()] +
+                 sizeFees.additional500gUpTo1kg[location.toLowerCase()] +
+                 (Math.ceil(weight - 1) * sizeFees.additionalKgAfter1kg[location.toLowerCase()]);
+        } else {
+          return sizeFees.first500g[location.toLowerCase()] +
+                 sizeFees.additional500gUpTo1kg[location.toLowerCase()] +
+                 (4 * sizeFees.additionalKgAfter1kg[location.toLowerCase()]) +
+                 (Math.ceil(weight - 5) * sizeFees.additionalKgAfter5kg[location.toLowerCase()]);
+        }
+      } else {
+        if (weight <= 12) {
+          return sizeFees.first12kg[location.toLowerCase()];
+        } else {
+          return sizeFees.first12kg[location.toLowerCase()] +
+                 (Math.ceil(weight - 12) * sizeFees.additionalKgAfter12kg[location.toLowerCase()]);
+        }
+      }
+    }
+
+    if (mode === 'FBA') {
+      const fees = weightHandlingFees.fba.standard[serviceLevel.toLowerCase()];
+      if (!fees) {
+        throw new Error(`Weight handling fees not defined for service level: ${serviceLevel}`);
+      }
+      if (weight <= 0.5) return fees.first500g;
+      if (weight <= 1) return fees.first500g + fees.additional500gUpTo1kg;
+      if (weight <= 5) {
+        return fees.first500g + fees.additional500gUpTo1kg +
+               (Math.ceil(weight - 1) * fees.additionalKgAfter1kg);
+      }
+      return fees.first500g + fees.additional500gUpTo1kg +
+             (4 * fees.additionalKgAfter1kg) +
+             (Math.ceil(weight - 5) * fees.additionalKgAfter5kg);
+    }
+
+    return 0;
+  } catch (error) {
+    console.error('Error in calculateWeightHandlingFee:', error);
+    throw error;
   }
-
-  let totalFee = 0;
-  const weightInGrams = weight * 1000;
-
-  if (weightInGrams <= 500) {
-    totalFee = fees.first500g[location];
-  } else if (weightInGrams <= 1000) {
-    totalFee = fees.first500g[location] + fees.additional500gUpTo1kg[location];
-  } else {
-    const additionalKgs = Math.ceil((weightInGrams - 1000) / 1000);
-    totalFee = fees.first500g[location] + 
-               fees.additional500gUpTo1kg[location] + 
-               (additionalKgs * fees.additionalKgAfter1kg[location]);
-  }
-
-  return totalFee;
 }
 
-function calculateClosingFee(price, feeStructures) {
-  const fees = feeStructures.closingFees.standard;
-  
-  if (price <= 250) return fees.upTo250;
-  if (price <= 500) return fees.upTo500;
-  if (price <= 1000) return fees.upTo1000;
-  return fees.above1000;
+function calculateClosingFee(mode, price) {
+  try {
+    const getFeeRange = (price) => {
+      if (price <= 250) return 'upTo250';
+      if (price <= 500) return 'upTo500';
+      if (price <= 1000) return 'upTo1000';
+      return 'above1000';
+    };
+
+    const range = getFeeRange(price);
+
+    if (mode === 'FBA') {
+      return closingFees.fba.normal[range];
+    } else if (mode === 'Easy Ship') {
+      return closingFees.easyShip.standard[range];
+    } else if (mode === 'Self Ship') {
+      return closingFees.selfShip[range];
+    }
+
+    return 0;
+  } catch (error) {
+    console.error('Error in calculateClosingFee:', error);
+    throw error;
+  }
 }
 
-function calculatePickAndPackFee(productSize, feeStructures) {
-  return feeStructures.pickAndPackFees[productSize];
+function calculatePickAndPackFee(mode, size) {
+  try {
+    if (mode !== 'FBA') return 0;
+    return size === 'Standard' ? otherFees.pickAndPack.standard : otherFees.pickAndPack.oversizeHeavyBulky;
+  } catch (error) {
+    console.error('Error in calculatePickAndPackFee:', error);
+    throw error;
+  }
 }
 
 function calculateFees(data, feeStructures) {
-  const referralFee = calculateReferralFee(
-    data.productCategory,
-    data.sellingPrice,
-    feeStructures
-  );
+  try {
+    const referralFee = calculateReferralFee(data.productCategory, data.sellingPrice);
+    const weightHandlingFee = calculateWeightHandlingFee(
+      data.shippingMode,
+      data.weight,
+      data.serviceLevel,
+      data.location,
+      data.productSize
+    );
+    const closingFee = calculateClosingFee(data.shippingMode, data.sellingPrice);
+    const pickAndPackFee = calculatePickAndPackFee(data.shippingMode, data.productSize);
 
-  const weightHandlingFee = calculateWeightHandlingFee(
-    data.weight,
-    data.shippingMode,
-    data.serviceLevel,
-    data.location,
-    feeStructures
-  );
+    const totalFees = referralFee + weightHandlingFee + closingFee + pickAndPackFee;
+    const netEarnings = data.sellingPrice - totalFees;
 
-  const closingFee = calculateClosingFee(
-    data.sellingPrice,
-    feeStructures
-  );
-
-  const pickAndPackFee = calculatePickAndPackFee(
-    data.productSize,
-    feeStructures
-  );
-
-  const totalFees = referralFee + weightHandlingFee + closingFee + pickAndPackFee;
-  const netEarnings = data.sellingPrice - totalFees;
-
-  return {
-    breakdown: {
+    return {
       referralFee,
       weightHandlingFee,
       closingFee,
-      pickAndPackFee
-    },
-    totalFees,
-    netEarnings
-  };
+      pickAndPackFee,
+      totalFees,
+      netEarnings
+    };
+  } catch (error) {
+    console.error('Error in calculateFees:', error);
+    throw error;
+  }
 }
 
 module.exports = {

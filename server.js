@@ -110,7 +110,7 @@ const feeStructures = {
   },
   
   closingFees: {
-    FBA: {
+    'FBA': {
       normal: {
         upTo250: 25,
         upTo500: 20,
@@ -159,7 +159,7 @@ const feeStructures = {
   }
 };
 
-app.post('/api/v1/profitability-calculator', async (req, res) => {
+app.post('/api/v1/profitability-calculator', (req, res) => {
   try {
     const {
       productCategory,
@@ -171,12 +171,22 @@ app.post('/api/v1/profitability-calculator', async (req, res) => {
       location
     } = req.body;
 
-    // Input validation
+    
     if (!productCategory || !sellingPrice || !weight) {
       return res.status(400).json({
         error: 'Missing required fields'
       });
     }
+
+    console.log('Calculating fees with the following data:', {
+      productCategory,
+      sellingPrice,
+      weight,
+      shippingMode,
+      serviceLevel,
+      productSize,
+      location
+    });
 
     const result = calculateFees({
       productCategory,
@@ -188,6 +198,7 @@ app.post('/api/v1/profitability-calculator', async (req, res) => {
       location
     }, feeStructures);
 
+    console.log('API Response:', result); 
     res.json(result);
   } catch (error) {
     console.error('Calculation error:', error);
@@ -202,7 +213,6 @@ app.get('/api/v1/fee-structures', (req, res) => {
   res.json(feeStructures);
 });
 
-// Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({
